@@ -5,7 +5,7 @@ class TradingAPI: ObservableObject {
     static let shared = TradingAPI()
     
     // Always use Render URL for now
-    private let baseURL = "https://boomtrade-backend.onrender.com"  // Your Render URL
+    let baseURL = "https://boomtrade-backend.onrender.com"  // Your Render URL
     
     @Published var isGatewayReady = false
     @Published var isAuthenticating = false
@@ -19,6 +19,9 @@ class TradingAPI: ObservableObject {
     // MARK: - Gateway Management
     
     func startGateway(username: String, password: String, account: String? = nil) async throws {
+        print("📡 TradingAPI.startGateway called")
+        print("📡 Base URL: \(baseURL)")
+        
         await MainActor.run {
             isAuthenticating = true
             authenticationMessage = "Starting IBKR Gateway..."
@@ -26,6 +29,7 @@ class TradingAPI: ObservableObject {
         
         let credentials = Credentials(username: username, password: password, account: account)
         let url = URL(string: "\(baseURL)/gateway/start")!
+        print("📡 Request URL: \(url)")
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -34,8 +38,15 @@ class TradingAPI: ObservableObject {
         request.timeoutInterval = 120  // 2 minutes for gateway startup
         
         do {
-            let (data, _) = try await session.data(for: request)
+            print("📡 Sending request to backend...")
+            let (data, response) = try await session.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("📡 Response status code: \(httpResponse.statusCode)")
+            }
+            
             let status = try decoder.decode(GatewayStatus.self, from: data)
+            print("📡 Gateway status: \(status)")
             
             if status.status == "ready" {
                 await MainActor.run {

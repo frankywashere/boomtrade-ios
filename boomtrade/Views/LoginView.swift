@@ -109,7 +109,7 @@ struct LoginView: View {
         } message: {
             Text(errorMessage)
         }
-        .onChange(of: api.isGatewayReady) { ready in
+        .onChange(of: api.isGatewayReady) { _, ready in
             if ready {
                 showingLogin = false
             }
@@ -117,14 +117,22 @@ struct LoginView: View {
     }
     
     private func login() {
+        print("🔵 LOGIN ATTEMPT")
+        print("Username: \(username)")
+        print("Account: \(account)")
+        print("URL: \(api.baseURL)")
+        
         Task {
             do {
+                print("🔵 Calling startGateway...")
                 try await api.startGateway(
                     username: username,
                     password: password,
                     account: account.isEmpty ? nil : account
                 )
+                print("✅ Gateway started successfully")
             } catch {
+                print("❌ Login error: \(error)")
                 errorMessage = error.localizedDescription
                 showingError = true
             }

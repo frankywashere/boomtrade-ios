@@ -47,8 +47,8 @@ struct OptionsView: View {
                         .padding(.vertical, 8)
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
-                        .onChange(of: selectedExpiry) { _ in
-                            if !selectedExpiry.isEmpty {
+                        .onChange(of: selectedExpiry) { _, newValue in
+                            if !newValue.isEmpty {
                                 loadOptionChain()
                             }
                         }
@@ -267,11 +267,11 @@ struct OptionOrderView: View {
                         Text("$\(contract.bid, specifier: "%.2f") / $\(contract.ask, specifier: "%.2f")")
                     }
                     
-                    if let iv = contract.impliedVolatility as? Double {
+                    if contract.impliedVolatility > 0 {
                         HStack {
                             Text("IV:")
                             Spacer()
-                            Text("\(iv * 100, specifier: "%.1f")%")
+                            Text("\(contract.impliedVolatility * 100, specifier: "%.1f")%")
                         }
                     }
                 }
