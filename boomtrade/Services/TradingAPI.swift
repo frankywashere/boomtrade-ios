@@ -4,75 +4,104 @@ import Combine
 class TradingAPI: ObservableObject {
     static let shared = TradingAPI()
     
-    // Always use Render URL for now
-    let baseURL = "https://boomtrade-backend.onrender.com"  // Your Render URL
+    // Local backend URL - runs on your Mac
+    let baseURL = "http://127.0.0.1:8000"
     
-    @Published var isGatewayReady = false
-    @Published var isAuthenticating = false
-    @Published var authenticationMessage = ""
+    @Published var isConnected = false
+    @Published var isConnecting = false
+    @Published var connectionMessage = ""
+    @Published var accountInfo: Account?
+    @Published var serverVersion: Int?
     
     private var cancellables = Set<AnyCancellable>()
     private let session = URLSession.shared
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
     
-    // MARK: - Gateway Management
+    // MARK: - Connection Management
     
-    func startGateway(username: String, password: String, account: String? = nil) async throws {
-        print("📡 TradingAPI.startGateway called")
-        print("📡 Base URL: \(baseURL)")
+    func connectToTWS(port: Int = 7497) async throws {
+        print("📡 Connecting to TWS on port \(port)")
         
         await MainActor.run {
-            isAuthenticating = true
-            authenticationMessage = "Starting IBKR Gateway..."
+            isConnecting = true
+            connectionMessage = "Connecting to TWS..."
         }
         
-        let credentials = Credentials(username: username, password: password, account: account)
-        let url = URL(string: "\(baseURL)/gateway/start")!
-        print("📡 Request URL: \(url)")
+        let config = ConnectionConfig(host: "127.0.0.1", port: port, clientId: 1)
+        let url = URL(string: "\(baseURL)/connect")!
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(credentials)
-        request.timeoutInterval = 120  // 2 minutes for gateway startup
+        request.httpBody = try encoder.encode(config)
+        request.timeoutInterval = 10
         
         do {
-            print("📡 Sending request to backend...")
             let (data, response) = try await session.data(for: request)
             
             if let httpResponse = response as? HTTPURLResponse {
                 print("📡 Response status code: \(httpResponse.statusCode)")
             }
             
-            let status = try decoder.decode(GatewayStatus.self, from: data)
-            print("📡 Gateway status: \(status)")
+            let status = try decoder.decode(ConnectionStatus.self, from: data)
+            print("📡 Connection status: \(status)")
             
-            if status.status == "ready" {
+            if status.status == "connected" {
                 await MainActor.run {
-                    isGatewayReady = true
-                    authenticationMessage = "Connected to IBKR"
+                    isConnected = true
+                    serverVersion = status.serverVersion
+                    connectionMessage = "Connected to TWS"
                 }
+                
+                // Fetch account info
+                try? await fetchAccountInfo()
             } else {
-                throw APIError.gatewayTimeout
+                throw APIError.connectionFailed("Failed to connect to TWS")
             }
         } catch {
             await MainActor.run {
-                isAuthenticating = false
-                authenticationMessage = "Failed to connect: \(error.localizedDescription)"
+                isConnecting = false
+                connectionMessage = "Connection failed: \(error.localizedDescription)"
             }
             throw error
         }
         
         await MainActor.run {
-            isAuthenticating = false
+            isConnecting = false
+        }
+    }
+    
+    func disconnect() async throws {
+        let url = URL(string: "\(baseURL)/disconnect")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        _ = try await session.data(for: request)
+        
+        await MainActor.run {
+            isConnected = false
+            connectionMessage = "Disconnected"
+            accountInfo = nil
         }
     }
     
     // MARK: - Account
     
+    func fetchAccountInfo() async throws {
+        guard isConnected else { throw APIError.notConnected }
+        
+        let url = URL(string: "\(baseURL)/account")!
+        let (data, _) = try await session.data(from: url)
+        let account = try decoder.decode(Account.self, from: data)
+        
+        await MainActor.run {
+            self.accountInfo = account
+        }
+    }
+    
     func getAccount() async throws -> Account {
-        guard isGatewayReady else { throw APIError.gatewayNotReady }
+        guard isConnected else { throw APIError.notConnected }
         
         let url = URL(string: "\(baseURL)/account")!
         let (data, _) = try await session.data(from: url)
@@ -82,7 +111,7 @@ class TradingAPI: ObservableObject {
     // MARK: - Positions
     
     func getPositions() async throws -> [Position] {
-        guard isGatewayReady else { throw APIError.gatewayNotReady }
+        guard isConnected else { throw APIError.notConnected }
         
         let url = URL(string: "\(baseURL)/positions")!
         let (data, _) = try await session.data(from: url)
@@ -92,9 +121,9 @@ class TradingAPI: ObservableObject {
     // MARK: - Market Data
     
     func getMarketData(symbol: String) async throws -> MarketData {
-        guard isGatewayReady else { throw APIError.gatewayNotReady }
+        guard isConnected else { throw APIError.notConnected }
         
-        let url = URL(string: "\(baseURL)/marketdata/\(symbol)")!
+        let url = URL(string: "\(baseURL)/market-data/\(symbol)")!
         let (data, _) = try await session.data(from: url)
         return try decoder.decode(MarketData.self, from: data)
     }
@@ -102,7 +131,7 @@ class TradingAPI: ObservableObject {
     // MARK: - Options
     
     func searchOptions(symbol: String) async throws -> [OptionChain] {
-        guard isGatewayReady else { throw APIError.gatewayNotReady }
+        guard isConnected else { throw APIError.notConnected }
         
         let url = URL(string: "\(baseURL)/options/search/\(symbol)")!
         let (data, _) = try await session.data(from: url)
@@ -110,7 +139,7 @@ class TradingAPI: ObservableObject {
     }
     
     func getOptionChain(symbol: String, expiry: String) async throws -> OptionChain {
-        guard isGatewayReady else { throw APIError.gatewayNotReady }
+        guard isConnected else { throw APIError.notConnected }
         
         let url = URL(string: "\(baseURL)/options/chain/\(symbol)/\(expiry)")!
         let (data, _) = try await session.data(from: url)
@@ -120,7 +149,7 @@ class TradingAPI: ObservableObject {
     // MARK: - Orders
     
     func placeStockOrder(_ order: StockOrder) async throws -> OrderResponse {
-        guard isGatewayReady else { throw APIError.gatewayNotReady }
+        guard isConnected else { throw APIError.notConnected }
         
         let url = URL(string: "\(baseURL)/order/stock")!
         var request = URLRequest(url: url)
@@ -133,7 +162,7 @@ class TradingAPI: ObservableObject {
     }
     
     func placeOptionOrder(_ order: OptionOrder) async throws -> OrderResponse {
-        guard isGatewayReady else { throw APIError.gatewayNotReady }
+        guard isConnected else { throw APIError.notConnected }
         
         let url = URL(string: "\(baseURL)/order/option")!
         var request = URLRequest(url: url)
@@ -144,22 +173,77 @@ class TradingAPI: ObservableObject {
         let (data, _) = try await session.data(for: request)
         return try decoder.decode(OrderResponse.self, from: data)
     }
+    
+    func getOpenOrders() async throws -> [OpenOrder] {
+        guard isConnected else { throw APIError.notConnected }
+        
+        let url = URL(string: "\(baseURL)/orders")!
+        let (data, _) = try await session.data(from: url)
+        return try decoder.decode([OpenOrder].self, from: data)
+    }
+}
+
+// MARK: - Models
+
+struct ConnectionConfig: Codable {
+    let host: String
+    let port: Int
+    let clientId: Int
+    
+    init(host: String = "127.0.0.1", port: Int = 7497, clientId: Int = 1) {
+        self.host = host
+        self.port = port
+        self.clientId = clientId
+    }
+}
+
+struct ConnectionStatus: Codable {
+    let status: String
+    let accounts: [String]?
+    let serverVersion: Int?
+    let connectionTime: String?
+    let marketDataAvailable: Bool?
+    
+    private enum CodingKeys: String, CodingKey {
+        case status, accounts
+        case serverVersion = "server_version"
+        case connectionTime = "connection_time"
+        case marketDataAvailable = "market_data_available"
+    }
+}
+
+struct OpenOrder: Codable {
+    let orderId: String
+    let symbol: String
+    let action: String
+    let quantity: Double
+    let orderType: String
+    let status: String?
+    let limitPrice: Double?
+    
+    private enum CodingKeys: String, CodingKey {
+        case orderId = "order_id"
+        case symbol, action, quantity
+        case orderType = "order_type"
+        case status
+        case limitPrice = "limit_price"
+    }
 }
 
 // MARK: - Error Handling
 
 enum APIError: LocalizedError {
-    case gatewayNotReady
-    case gatewayTimeout
+    case notConnected
+    case connectionFailed(String)
     case invalidResponse
     case networkError(String)
     
     var errorDescription: String? {
         switch self {
-        case .gatewayNotReady:
-            return "Gateway is not ready. Please authenticate first."
-        case .gatewayTimeout:
-            return "Gateway startup timeout. Please try again."
+        case .notConnected:
+            return "Not connected to TWS. Please connect first."
+        case .connectionFailed(let message):
+            return "Connection failed: \(message)"
         case .invalidResponse:
             return "Invalid response from server."
         case .networkError(let message):
@@ -173,5 +257,12 @@ enum APIError: LocalizedError {
 struct OrderResponse: Codable {
     let orderId: String
     let status: String
-    let message: String?
+    let contract: String?
+    let action: String?
+    let quantity: Int?
+    
+    private enum CodingKeys: String, CodingKey {
+        case orderId = "order_id"
+        case status, contract, action, quantity
+    }
 }

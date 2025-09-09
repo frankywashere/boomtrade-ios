@@ -2,9 +2,7 @@ import SwiftUI
 
 struct LoginView: View {
     @StateObject private var api = TradingAPI.shared
-    @State private var username = ""
-    @State private var password = ""
-    @State private var account = ""
+    @State private var selectedPort = 7497  // Default to paper trading
     @State private var showingError = false
     @State private var errorMessage = ""
     @Binding var showingLogin: Bool
@@ -20,65 +18,46 @@ struct LoginView: View {
                     .font(.largeTitle)
                     .fontWeight(.bold)
                 
-                Text("Connect to IBKR")
+                Text("Connect to TWS/IB Gateway")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
             .padding(.top, 50)
             
-            VStack(spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Username")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    TextField("IBKR Username", text: $username)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                }
+            // Connection Type Selection
+            VStack(spacing: 15) {
+                Text("Select Trading Mode")
+                    .font(.headline)
                 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Password")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    SecureField("IBKR Password", text: $password)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                Picker("Trading Mode", selection: $selectedPort) {
+                    Text("Paper Trading").tag(7497)
+                    Text("Live Trading").tag(7496)
                 }
+                .pickerStyle(SegmentedPickerStyle())
+                .padding(.horizontal, 30)
                 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Account (Optional)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    TextField("Account ID", text: $account)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                }
+                Text("Port: \(selectedPort)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
-            .padding(.horizontal, 30)
             
-            if api.isAuthenticating {
+            if api.isConnecting {
                 VStack(spacing: 15) {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle())
                         .scaleEffect(1.2)
                     
-                    Text(api.authenticationMessage)
+                    Text(api.connectionMessage)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
-                    
-                    Text("This may take 60-90 seconds on first connection")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .italic()
                 }
                 .padding()
             } else {
-                Button(action: login) {
+                Button(action: connect) {
                     HStack {
-                        Image(systemName: "arrow.right.circle.fill")
-                        Text("Connect to IBKR")
+                        Image(systemName: "link.circle.fill")
+                        Text("Connect to TWS")
                             .fontWeight(.semibold)
                     }
                     .foregroundColor(.white)
@@ -88,20 +67,30 @@ struct LoginView: View {
                     .cornerRadius(10)
                 }
                 .padding(.horizontal, 30)
-                .disabled(username.isEmpty || password.isEmpty)
             }
             
             Spacer()
             
-            VStack(spacing: 10) {
-                Text("Important: IBKR Gateway will start on connection")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+            // Setup Instructions
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Setup Instructions:")
+                    .font(.headline)
+                    .padding(.bottom, 5)
                 
-                Text("You may need to approve 2FA in IBKR Mobile")
-                    .font(.caption2)
-                    .foregroundColor(.orange)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Login to TWS or IB Gateway", systemImage: "1.circle.fill")
+                    Label("Enable API connections in settings", systemImage: "2.circle.fill")
+                    Label("Set socket port to \(selectedPort)", systemImage: "3.circle.fill")
+                    Label("Add 127.0.0.1 to trusted IPs", systemImage: "4.circle.fill")
+                    Label("Click Connect above", systemImage: "5.circle.fill")
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
+            .padding()
+            .background(Color.gray.opacity(0.1))
+            .cornerRadius(10)
+            .padding(.horizontal, 20)
             .padding(.bottom, 30)
         }
         .alert("Connection Error", isPresented: $showingError) {
@@ -109,30 +98,25 @@ struct LoginView: View {
         } message: {
             Text(errorMessage)
         }
-        .onChange(of: api.isGatewayReady) { _, ready in
-            if ready {
+        .onChange(of: api.isConnected) { _, connected in
+            if connected {
                 showingLogin = false
             }
         }
     }
     
-    private func login() {
-        print("🔵 LOGIN ATTEMPT")
-        print("Username: \(username)")
-        print("Account: \(account)")
+    private func connect() {
+        print("🔵 CONNECTION ATTEMPT")
+        print("Port: \(selectedPort)")
         print("URL: \(api.baseURL)")
         
         Task {
             do {
-                print("🔵 Calling startGateway...")
-                try await api.startGateway(
-                    username: username,
-                    password: password,
-                    account: account.isEmpty ? nil : account
-                )
-                print("✅ Gateway started successfully")
+                print("🔵 Calling connectToTWS...")
+                try await api.connectToTWS(port: selectedPort)
+                print("✅ Connected successfully")
             } catch {
-                print("❌ Login error: \(error)")
+                print("❌ Connection error: \(error)")
                 errorMessage = error.localizedDescription
                 showingError = true
             }
